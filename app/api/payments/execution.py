@@ -17,7 +17,7 @@ def get_db():
 
 
 @router.post("/{payment_id}/execute", response_model=PaymentExecuteResponse)
-def execute_payment(payment_id: str, db: Session = Depends(get_db)):
+def payment_execution(payment_id: str, db: Session = Depends(get_db)):
     try:
         payment = execute_payment(db, payment_id)
     except ValueError as exc:
