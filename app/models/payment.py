@@ -7,7 +7,8 @@ from sqlalchemy import (
     DateTime,
     Enum,
     Numeric,
-    Boolean
+    Boolean,
+    Integer
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -64,4 +65,15 @@ class Payment(Base):
 
     failure_reason: Mapped[str | None] = mapped_column(
         String, nullable=True
+    )
+    execute_idempotency_key: Mapped[str | None] = mapped_column(
+        String, unique=True, nullable=True
+    )
+
+    retry_count: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
+
+    executed_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
     )

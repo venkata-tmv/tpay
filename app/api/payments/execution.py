@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
@@ -17,7 +17,8 @@ def get_db():
 
 
 @router.post("/{payment_id}/execute", response_model=PaymentExecuteResponse)
-def payment_execution(payment_id: str, db: Session = Depends(get_db)):
+def payment_execution(payment_id: str, db: Session = Depends(get_db), 
+                      idempotency_key: str = Header(..., alias="Idempotency-Key")):
     try:
         payment = execute_payment(db, payment_id)
     except ValueError as exc:

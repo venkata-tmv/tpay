@@ -8,6 +8,7 @@ app.include_router(
     prefix="/payments",
     tags=["Payments"]
 )
+from app.api.payments.reconciliation import router as reconciliation_router
 
 @app.get("/health")
 def health():
