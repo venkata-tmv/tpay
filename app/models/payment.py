@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     Numeric,
+    Boolean
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -51,4 +52,16 @@ class Payment(Base):
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow
+    )
+
+    provider: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
+
+    provider_payment_id: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
+
+    failure_reason: Mapped[str | None] = mapped_column(
+        String, nullable=True
     )
