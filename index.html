@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Tilled PM Test</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
+      .row { margin: 12px 0; }
+      input { width: 520px; max-width: 100%; padding: 10px; }
+      button { padding: 10px 14px; }
+      pre { background: #f6f6f6; padding: 12px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h2>Tilled sandbox: create payment_method_id</h2>
+
+    <div class="row">
+      <button id="loadConfig">Load /tilled/config</button>
+    </div>
+
+    <div class="row">
+      <label>Publishable key</label><br/>
+      <input id="pk" placeholder="pk_..." />
+    </div>
+
+    <div class="row">
+      <label>Merchant account id</label><br/>
+      <input id="acct" placeholder="acct_..." />
+    </div>
+
+    <div class="row">
+      <button id="createPm">Create Payment Method (Card)</button>
+    </div>
+
+    <h3>Output</h3>
+    <pre id="out"></pre>
+
+    <script>
+      const out = document.getElementById("out");
+      const pkEl = document.getElementById("pk");
+      const acctEl = document.getElementById("acct");
+
+      function log(obj) {
+        out.textContent = (typeof obj === "string") ? obj : JSON.stringify(obj, null, 2);
+      }
+
+      document.getElementById("loadConfig").onclick = async () => {
+        const res = await fetch("http://127.0.0.1:8000/tilled/config");
+        const cfg = await res.json();
+        pkEl.value = cfg.publishable_key;
+        acctEl.value = cfg.account_id;
+        log(cfg);
+      };
+
+      // IMPORTANT:
+      // You'll need to include Tilled Payments.js script tag per their docs.
+      // Replace the src below with the exact one from Tilled docs/dashboard.
+      //
+      // The docs describe initializing like:
+      //   new Payments('pk_...', 'acct_...', { sandbox: true })
+      // and then confirming a Payment Intent / attaching a payment method. :contentReference[oaicite:1]{index=1}
+    </script>
+
+    <!-- TODO: Add the official Tilled Payments.js <script src="..."></script> here -->
+  </body>
+</html>
