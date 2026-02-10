@@ -1,0 +1,257 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>TPay + Tilled.js E2E Test</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <script src="https://js.tilled.com/v2" defer></script>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
+      .row { margin: 12px 0; }
+      input { width: 520px; max-width: 100%; padding: 10px; }
+      button { padding: 10px 14px; cursor: pointer; }
+      .field { border: 1px solid #ddd; padding: 10px; border-radius: 8px; }
+      pre { background: #f6f6f6; padding: 12px; overflow: auto; border-radius: 8px; }
+      .grid { display: grid; gap: 12px; max-width: 560px; }
+      .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    </style>
+  </head>
+  <body>
+    <h2>TPay end-to-end test (Tilled.js)</h2>
+
+    <div class="grid">
+      <div class="row">
+        <button id="loadConfig">1) Load /tilled/config</button>
+      </div>
+
+      <div class="row">
+        <label>Backend API base</label><br />
+        <input id="apiBase" value="http://127.0.0.1:8000" />
+      </div>
+
+      <div class="row">
+        <label>Job ID</label><br />
+        <input id="jobId" value="job_123" />
+      </div>
+
+      <div class="row">
+        <label>Invoice ID</label><br />
+        <input id="invoiceId" value="inv_123" />
+      </div>
+
+      <div class="row">
+        <label>Amount (e.g., 10.00)</label><br />
+        <input id="amount" value="10.00" />
+      </div>
+
+      <div class="row">
+        <label>Currency</label><br />
+        <input id="currency" value="USD" />
+      </div>
+
+      <div class="row">
+        <label>Idempotency Key</label><br />
+        <input id="idem" />
+      </div>
+
+      <div class="row">
+        <button id="createIntent">2) Create internal Payment Intent</button>
+      </div>
+
+      <div class="row">
+        <label>Payment ID (auto-filled)</label><br />
+        <input id="paymentId" />
+      </div>
+
+      <div class="row">
+        <button id="createProviderIntent">3) Create Provider Intent (get client_secret)</button>
+      </div>
+
+      <div class="row">
+        <label>client_secret (auto-filled)</label><br />
+        <input id="clientSecret" />
+      </div>
+
+      <hr/>
+
+      <h3>Card details (Tilled.js fields)</h3>
+
+      <div class="row">
+        <div>Card number</div>
+        <div id="card-number-element" class="field"></div>
+      </div>
+
+      <div class="two">
+        <div>
+          <div>Expiry</div>
+          <div id="card-expiration-element" class="field"></div>
+        </div>
+        <div>
+          <div>CVV</div>
+          <div id="card-cvv-element" class="field"></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>Cardholder name</label><br />
+        <input id="name" value="John Doe" />
+      </div>
+
+      <div class="two">
+        <div>
+          <label>ZIP</label><br />
+          <input id="zip" value="80021" />
+        </div>
+        <div>
+          <label>Country</label><br />
+          <input id="country" value="US" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="confirm">4) Confirm Payment using Tilled.js</button>
+      </div>
+
+      <div class="row">
+        <button id="checkStatus">5) Check backend status (GET /payments/{id})</button>
+      </div>
+
+      <div class="row">
+        <button id="checkWebhooks">6) View webhook events (GET /webhooks/events?payment_id=...)</button>
+      </div>
+
+      <h3>Output</h3>
+      <pre id="out"></pre>
+    </div>
+
+    <script>
+      const out = document.getElementById("out");
+      const apiBaseEl = document.getElementById("apiBase");
+      const paymentIdEl = document.getElementById("paymentId");
+      const clientSecretEl = document.getElementById("clientSecret");
+
+      let tilled = null;
+      let form = null;
+
+      function log(obj) {
+        out.textContent = (typeof obj === "string") ? obj : JSON.stringify(obj, null, 2);
+      }
+
+      function randIdem() {
+        return "idem_" + Math.random().toString(16).slice(2) + "_" + Date.now();
+      }
+
+      document.getElementById("idem").value = randIdem();
+
+      document.getElementById("loadConfig").onclick = async () => {
+        const base = apiBaseEl.value.replace(/\/$/, "");
+        const cfgRes = await fetch(`${base}/tilled/config`);
+        const cfg = await cfgRes.json();
+
+        // doc shows: new Tilled('pk_…', 'acct_…', { sandbox: true }) :contentReference[oaicite:1]{index=1}
+        tilled = new Tilled(cfg.publishable_key, cfg.account_id, { sandbox: cfg.sandbox });
+
+        // build card fields using tilled.form + createField + build :contentReference[oaicite:2]{index=2}
+        form = await tilled.form({ payment_method_type: "card" });
+        form.createField("cardNumber").inject("#card-number-element");
+        form.createField("cardExpiry").inject("#card-expiration-element");
+        form.createField("cardCvv").inject("#card-cvv-element");
+        await form.build();
+
+        log({ loaded: true, cfg });
+      };
+
+      document.getElementById("createIntent").onclick = async () => {
+        const base = apiBaseEl.value.replace(/\/$/, "");
+        const payload = {
+          job_id: document.getElementById("jobId").value,
+          invoice_id: document.getElementById("invoiceId").value,
+          amount: document.getElementById("amount").value,
+          currency: document.getElementById("currency").value,
+          idempotency_key: document.getElementById("idem").value,
+        };
+
+        // your API: POST /payments/intents
+        const res = await fetch(`${base}/payments/intents`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        if (!res.ok) return log(data);
+
+        paymentIdEl.value = data.payment_id;
+        log({ step: "internal_intent_created", data });
+      };
+
+      document.getElementById("createProviderIntent").onclick = async () => {
+        const base = apiBaseEl.value.replace(/\/$/, "");
+        const paymentId = paymentIdEl.value.trim();
+        if (!paymentId) return log("Missing payment_id");
+
+        // your API (from earlier work): POST /payments/{id}/provider-intent
+        const res = await fetch(`${base}/payments/${paymentId}/provider-intent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ confirm: false }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) return log(data);
+
+        // expect provider client_secret to come back
+        clientSecretEl.value = data.client_secret || data.provider_client_secret || "";
+        log({ step: "provider_intent_created", data });
+      };
+
+      document.getElementById("confirm").onclick = async () => {
+        if (!tilled || !form) return log("Click 'Load /tilled/config' first (Tilled.js not initialized)");
+        const clientSecret = clientSecretEl.value.trim();
+        if (!clientSecret) return log("Missing client_secret");
+
+        const billing = {
+          name: document.getElementById("name").value,
+          address: {
+            zip: document.getElementById("zip").value,
+            country: document.getElementById("country").value,
+          },
+        };
+
+        // doc shows confirmPayment(client_secret, { payment_method: { billing_details... }}) :contentReference[oaicite:3]{index=3}
+        try {
+          const paymentIntent = await tilled.confirmPayment(clientSecret, {
+            payment_method: {
+              type: "card",
+              billing_details: billing,
+            },
+          });
+
+          log({ step: "confirmed", paymentIntent });
+        } catch (e) {
+          log({ step: "confirm_error", message: e?.message || String(e) });
+        }
+      };
+
+      document.getElementById("checkStatus").onclick = async () => {
+        const base = apiBaseEl.value.replace(/\/$/, "");
+        const paymentId = paymentIdEl.value.trim();
+        if (!paymentId) return log("Missing payment_id");
+
+        const res = await fetch(`${base}/payments/${paymentId}`);
+        const data = await res.json();
+        log({ step: "payment_status", data });
+      };
+
+      document.getElementById("checkWebhooks").onclick = async () => {
+        const base = apiBaseEl.value.replace(/\/$/, "");
+        const paymentId = paymentIdEl.value.trim();
+        if (!paymentId) return log("Missing payment_id");
+
+        const res = await fetch(`${base}/webhooks/events?payment_id=${encodeURIComponent(paymentId)}&limit=20`);
+        const data = await res.json();
+        log({ step: "webhook_events", data });
+      };
+    </script>
+  </body>
+</html>

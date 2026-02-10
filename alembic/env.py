@@ -13,6 +13,7 @@ from alembic import context
 from app.core.database import Base
 from app.models.payment import Payment
 from app.models.reconciliation import ReconciliationRun, ReconciliationItem
+from app.models.webhook_event import WebhookEvent 
 from app.core.database import DATABASE_URL
 
 # this is the Alembic Config object, which provides
