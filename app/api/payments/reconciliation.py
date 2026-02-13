@@ -1,5 +1,5 @@
 from datetime import date
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
@@ -23,18 +23,21 @@ def run_recon(report_date: date, db: Session = Depends(get_db)):
     run = run_reconciliation(db, report_date)
     return ReconciliationRunResponse(run_id=run.id, report_date=run.report_date, status=run.status.value)
 
-
 @router.get("/exceptions", response_model=list[ReconciliationExceptionItem])
-def list_exceptions(db: Session = Depends(get_db)):
-    items = (
-        db.query(ReconciliationItem)
-        .filter(
-            ReconciliationItem.status.in_(
-                [ReconciliationItemStatus.MISMATCH, ReconciliationItemStatus.MISSING]
-            )
+def list_exceptions(
+    db: Session = Depends(get_db),
+    run_id: str | None = Query(default=None),
+):
+    q = db.query(ReconciliationItem).filter(
+        ReconciliationItem.status.in_(
+            [ReconciliationItemStatus.MISMATCH, ReconciliationItemStatus.MISSING]
         )
-        .all()
     )
+
+    if run_id:
+        q = q.filter(ReconciliationItem.run_id == run_id)
+
+    items = q.all()
 
     return [
         ReconciliationExceptionItem(
