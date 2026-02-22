@@ -5,6 +5,7 @@ from app.api.tilled import router as tilled_router
 from app.api.webhooks import router as webhooks_router
 from app.api.webhook_events import router as webhook_events_router
 from fastapi.middleware.cors import CORSMiddleware
+from app.api.servicetitan import router as servicetitan_router
 
 app = FastAPI(title="TPay", version="1.0.0")
 app.add_middleware(
@@ -31,7 +32,7 @@ app.include_router(
 app.include_router(tilled_router, prefix="/tilled", tags=["Tilled"])
 app.include_router(webhooks_router, prefix="/webhooks", tags=["Webhooks"])
 app.include_router(webhook_events_router, prefix="/webhooks", tags=["Webhooks"])
-
+app.include_router(servicetitan_router, prefix="/servicetitan", tags=["ServiceTitan"])
 
 @app.get("/health")
 def health():

@@ -13,7 +13,11 @@ class Settings(BaseSettings):
     # Webhooks
     TILLED_WEBHOOK_SECRET: str
     TILLED_WEBHOOK_TOLERANCE_SECONDS: int = 300
-
-
+    ST_API_BASE_URL: str
+    ST_TOKEN_URL: str
+    ST_APP_KEY: str
+    ST_CLIENT_ID: str
+    ST_CLIENT_SECRET: str
+    ST_TENANT_ID: str
 
 settings = Settings()
