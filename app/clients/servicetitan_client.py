@@ -116,3 +116,94 @@ class ServiceTitanClient:
             raise ServiceTitanAPIError(f"ServiceTitan error {resp.status_code}: {resp.text}")
 
         return resp.json()
+
+    def get_customers(self, *, tenant: str, params: dict[str, Any]) -> dict[str, Any]:
+        """
+        Calls:
+        GET /crm/v2/tenant/{tenant}/customers
+        Useful params:
+          - ids (comma-separated)
+          - name, phone, city, state, active
+          - page, pageSize, includeTotal
+        """
+        url = f"{self.api_base}/crm/v2/tenant/{tenant}/customers"
+
+        try:
+            resp = httpx.get(url, headers=self._headers(), params=params, timeout=30)
+        except httpx.HTTPError as exc:
+            raise ServiceTitanAPIError(f"ServiceTitan request failed: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise ServiceTitanAPIError(f"ServiceTitan error {resp.status_code}: {resp.text}")
+
+        return resp.json()
+    
+    def patch_invoice_custom_fields(
+        self,
+        *,
+        tenant: str,
+        operations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """
+        PATCH /accounting/v2/tenant/{tenant}/invoices/custom-fields
+        Body:
+        {
+          "operations": [
+            {
+              "objectId": <invoice_id>,
+              "customFields": [{"name": "...", "value": "..."}]
+            }
+          ]
+        }
+        """
+        url = f"{self.api_base}/accounting/v2/tenant/{tenant}/invoices/custom-fields"
+        body = {"operations": operations}
+
+        try:
+            resp = httpx.patch(url, headers=self._headers(), json=body, timeout=30)
+        except httpx.HTTPError as exc:
+            raise ServiceTitanAPIError(f"ServiceTitan request failed: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise ServiceTitanAPIError(f"ServiceTitan error {resp.status_code}: {resp.text}")
+
+        return resp.json() if resp.text else {"ok": True}
+    
+    def get_job_by_id(self, *, tenant: str, job_id: int, externalDataApplicationGuid: str | None = None) -> dict[str, Any]:
+        url = f"{self.api_base}/jpm/v2/tenant/{tenant}/jobs/{job_id}"
+        params: dict[str, Any] = {}
+        if externalDataApplicationGuid:
+            params["externalDataApplicationGuid"] = externalDataApplicationGuid
+        try:
+            resp = httpx.get(url, headers=self._headers(), params=params, timeout=30)
+        except httpx.HTTPError as exc:
+            raise ServiceTitanAPIError(f"ServiceTitan request failed: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise ServiceTitanAPIError(f"ServiceTitan error {resp.status_code}: {resp.text}")
+
+        return resp.json()
+
+    def get_employees(self, *, tenant: str, params: dict[str, Any]) -> dict[str, Any]:
+        url = f"{self.api_base}/settings/v2/tenant/{tenant}/employees"
+        try:
+            resp = httpx.get(url, headers=self._headers(), params=params, timeout=30)
+        except httpx.HTTPError as exc:
+            raise ServiceTitanAPIError(f"ServiceTitan request failed: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise ServiceTitanAPIError(f"ServiceTitan error {resp.status_code}: {resp.text}")
+
+        return resp.json()
+
+    def get_technicians(self, *, tenant: str, params: dict[str, Any]) -> dict[str, Any]:
+        url = f"{self.api_base}/settings/v2/tenant/{tenant}/technicians"
+        try:
+            resp = httpx.get(url, headers=self._headers(), params=params, timeout=30)
+        except httpx.HTTPError as exc:
+            raise ServiceTitanAPIError(f"ServiceTitan request failed: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise ServiceTitanAPIError(f"ServiceTitan error {resp.status_code}: {resp.text}")
+
+        return resp.json()

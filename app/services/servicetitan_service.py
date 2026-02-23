@@ -44,3 +44,19 @@ def get_invoice_core(invoice_id: int, tenant: str | None = None) -> STInvoiceCor
         balance=balance,
         paid_on=inv.get("paidOn"),
     )
+
+def get_job_detail(job_id: int, externalDataApplicationGuid: str | None = None) -> dict[str, Any]:
+    client = ServiceTitanClient()
+    return client.get_job_by_id(
+        tenant=settings.ST_TENANT_ID,
+        job_id=job_id,
+        externalDataApplicationGuid=externalDataApplicationGuid,
+    )
+
+def list_employees(params: dict[str, Any]) -> dict[str, Any]:
+    client = ServiceTitanClient()
+    return client.get_employees(tenant=settings.ST_TENANT_ID, params=params)
+
+def list_technicians(params: dict[str, Any]) -> dict[str, Any]:
+    client = ServiceTitanClient()
+    return client.get_technicians(tenant=settings.ST_TENANT_ID, params=params)
