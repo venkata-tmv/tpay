@@ -207,3 +207,24 @@ class ServiceTitanClient:
             raise ServiceTitanAPIError(f"ServiceTitan error {resp.status_code}: {resp.text}")
 
         return resp.json()
+    
+    def create_payment(self, *, tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """
+        POST /accounting/v2/tenant/{tenant}/payments
+        """
+        url = f"{self.api_base}/accounting/v2/tenant/{tenant}/payments"
+        try:
+            resp = httpx.post(url, headers=self._headers(), json=payload, timeout=30)
+        except httpx.HTTPError as exc:
+            raise ServiceTitanAPIError(f"ServiceTitan request failed: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise ServiceTitanAPIError(f"ServiceTitan error {resp.status_code}: {resp.text}")
+
+        return resp.json()
+
+    def list_payment_types(self, tenant: str) -> dict:
+        url = f"{self.api_base}/accounting/v2/tenant/{tenant}/payment-types"
+        resp = httpx.get(url, headers=self._headers(), timeout=30)
+        resp.raise_for_status()
+        return resp.json()

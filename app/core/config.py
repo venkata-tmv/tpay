@@ -19,5 +19,8 @@ class Settings(BaseSettings):
     ST_CLIENT_ID: str
     ST_CLIENT_SECRET: str
     ST_TENANT_ID: str
+    # ServiceTitan payment write-back
+    ST_PAYMENT_TYPE_ID: int
+    ST_PAYMENT_MEMO_PREFIX: str = "TPay"
 
 settings = Settings()

@@ -77,3 +77,13 @@ class Payment(Base):
     executed_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )
+
+    st_payment_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    st_writeback_status: Mapped[str | None] = mapped_column(String, nullable=True)  # "pending"|"succeeded"|"failed"
+    st_writeback_error: Mapped[str | None] = mapped_column(String, nullable=True)
+    st_written_back_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    # snapshot what we charged & why (helps audit + recon)
+    amount_source: Mapped[str | None] = mapped_column(String, nullable=True)  # "balance"|"total"|"manual"
+    st_invoice_total: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    st_invoice_balance: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)

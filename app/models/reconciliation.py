@@ -2,7 +2,7 @@ import enum
 from datetime import datetime, date
 from decimal import Decimal
 
-from sqlalchemy import String, DateTime, Enum, Date, Numeric, ForeignKey
+from sqlalchemy import String, DateTime, Enum, Date, Numeric, ForeignKey, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -43,3 +43,7 @@ class ReconciliationItem(Base):
 
     status: Mapped[ReconciliationItemStatus] = mapped_column(Enum(ReconciliationItemStatus), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    st_balance_expected: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    st_balance_actual: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
+    st_balance_match: Mapped[bool | None] = mapped_column(Boolean, nullable=True)

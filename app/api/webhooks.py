@@ -11,6 +11,7 @@ from app.core.config import settings
 from app.core.tilled_webhook import verify_tilled_signature, WebhookSignatureError
 from app.models.payment import Payment, PaymentStatus
 from app.models.webhook_event import WebhookEvent
+from app.services.servicetitan_writeback_service import write_payment_to_servicetitan_invoice
 
 router = APIRouter()
 
@@ -100,6 +101,19 @@ async def tilled_webhook(request: Request, db: Session = Depends(get_db)):
             payment.status = PaymentStatus.SUCCEEDED
             payment.executed_at = datetime.utcnow()
             payment.failure_reason = None
+            db.commit()
+
+            # ✅ write back to ServiceTitan (idempotent)
+            try:
+                write_payment_to_servicetitan_invoice(
+                    db=db,
+                    payment_id=payment.id,
+                    tenant=settings.ST_TENANT_ID,
+                    webhook_event_id=provider_event_id,
+                )
+            except Exception as exc:
+                webhook_row.processing_error = f"ST writeback failed: {exc}"
+                db.commit()
 
         elif event_type == "payment_intent.payment_failed":
             payment.status = PaymentStatus.FAILED

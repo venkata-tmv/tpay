@@ -293,3 +293,15 @@ def get_technicians_api(
         raise HTTPException(status_code=401, detail=str(exc))
     except ServiceTitanAPIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+    
+@router.get("/payment-types")
+def get_payement_types(
+    tenant: str = Query(default=settings.ST_TENANT_ID),
+):
+    client = ServiceTitanClient()
+    try:
+        return client.list_payment_types(tenant=tenant)
+    except ServiceTitanAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    except ServiceTitanAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))

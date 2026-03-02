@@ -11,7 +11,7 @@ from app.models.reconciliation import (
     ReconciliationItemStatus,
 )
 from app.clients.tilled_client import TilledClient
-
+from app.services.servicetitan_service import get_invoice_core
 
 def _date_bounds(d: date) -> tuple[datetime, datetime]:
     start = datetime.combine(d, time.min)
@@ -95,8 +95,28 @@ def run_reconciliation(db: Session, report_date: date) -> ReconciliationRun:
         amount_match = (provider_amount is not None and provider_amount == expected_amount)
         status_ok = (provider_status == "succeeded")
 
+        st_expected = None
+        st_actual = None
+        st_match = None
+
+        # We can only compute expected ST balance if we captured the original balance snapshot
+        if p.st_invoice_balance is not None:
+            st_expected = (p.st_invoice_balance - expected_amount)
+            if st_expected < Decimal("0"):
+                st_expected = Decimal("0.00")
+
+            try:
+                st_inv = get_invoice_core(int(p.invoice_id))
+                st_actual = st_inv.balance
+                st_match = abs(st_actual - st_expected) <= Decimal("0.01")
+            except Exception:
+                st_match = None
+
         if amount_match and status_ok:
-            status = ReconciliationItemStatus.MATCHED
+            if st_expected is not None and st_match is False:
+                status = ReconciliationItemStatus.MISMATCH
+            else:
+                status = ReconciliationItemStatus.MATCHED
         else:
             status = ReconciliationItemStatus.MISMATCH
 
