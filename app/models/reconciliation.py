@@ -2,7 +2,8 @@ import enum
 from datetime import datetime, date
 from decimal import Decimal
 
-from sqlalchemy import String, DateTime, Enum, Date, Numeric, ForeignKey, Boolean
+from sqlalchemy import String, DateTime, Enum, Date, Numeric, ForeignKey, Boolean, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -41,9 +42,14 @@ class ReconciliationItem(Base):
     expected_amount: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
     actual_amount: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
 
-    status: Mapped[ReconciliationItemStatus] = mapped_column(Enum(ReconciliationItemStatus), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    internal_status = mapped_column(Text, nullable=True)
+    provider_status = mapped_column(Text, nullable=True)
+    mismatch_reasons = mapped_column(JSONB, nullable=True)
+    error = mapped_column(Text, nullable=True)
 
     st_balance_expected: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     st_balance_actual: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), nullable=True)
     st_balance_match: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    status: Mapped[ReconciliationItemStatus] = mapped_column(Enum(ReconciliationItemStatus), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
