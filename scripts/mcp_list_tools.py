@@ -6,7 +6,7 @@ from mcp.client.stdio import stdio_client, StdioServerParameters
 
 async def main():
     server = StdioServerParameters(
-        command="/Users/mkowt/Code/tpay/.venv/bin/python",
+        command="/Users/likith/Documents/tpay/.venv/bin/python",
         args=["-m", "app.mcp_servicetitan_read_server"],
         cwd="/Users/mkowt/Code/tpay",
         env=None,  # inherits your environment; cwd points to .env location
