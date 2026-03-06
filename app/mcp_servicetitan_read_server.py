@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 # Force-load .env regardless of working directory
-load_dotenv(dotenv_path="/Users/mkowt/Code/tpay/.env", override=False)
+load_dotenv(dotenv_path="/Users/likith/Documents/tpay/.env", override=False)
 
 # Log to stderr (stdio MCP uses stdout for protocol)
 handler = logging.StreamHandler(sys.stderr)
