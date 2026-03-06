@@ -25,7 +25,7 @@ _token_cache = _TokenCache()
 
 class ServiceTitanClient:
     """
-    ServiceTitan Integration environment client:
+    ServiceTitan API client:
     - OAuth2 token (client_credentials) from ST_TOKEN_URL
     - API calls to ST_API_BASE_URL with required headers (ST-App-Key, Authorization)
     """

@@ -1,0 +1,76 @@
+jobs:
+  description: ServiceTitan jobs dataset
+  path: /jpm/v2/tenant/{tenant_id}/jobs
+  items_key: data
+  default_page_size: 200
+  pii_fields:
+    - phone
+    - email
+    - address
+  allowed_params:
+    - page
+    - pageSize
+    - ids
+    - number
+    - jobStatus
+    - technicianId
+    - customerId
+    - locationId
+    - businessUnitId
+    - createdBefore
+    - createdOnOrAfter
+    - modifiedBefore
+    - modifiedOnOrAfter
+    - completedBefore
+    - completedOnOrAfter  
+
+invoices:
+  description: ServiceTitan invoices dataset
+  path: /accounting/v2/tenant/{tenant_id}/invoices
+  items_key: data
+  default_page_size: 200
+  allowed_params:
+    - page
+    - pageSize
+    - ids
+    - customerId
+    - jobId
+    - invoiceNumber
+    - createdBefore
+    - createdOnOrAfter
+    - modifiedBefore
+    - modifiedOnOrAfter
+
+payments:
+  path: /accounting/v2/tenant/{tenant_id}/payments
+  items_key: data
+  allowed_params:
+    - page
+    - pageSize
+    - invoiceId
+    - createdBefore
+    - createdOnOrAfter
+
+memberships:
+  path: /memberships/v2/tenant/{tenant_id}/memberships
+  items_key: data
+  allowed_params:
+    - page
+    - pageSize
+    - status
+    - createdBefore
+    - createdOnOrAfter
+
+technicians:
+  path: /jpm/v2/tenant/{tenant_id}/technicians
+  items_key: data
+  allowed_params:
+    - page
+    - pageSize
+
+campaigns:
+  path: /marketing/v2/tenant/{tenant_id}/campaigns
+  items_key: data
+  allowed_params:
+    - page
+    - pageSize
