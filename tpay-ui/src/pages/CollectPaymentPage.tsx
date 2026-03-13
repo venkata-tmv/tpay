@@ -1,196 +1,560 @@
 import { useMemo, useState } from "react";
-import { Button } from "./../components/ui/button";
-import { Input } from "./../components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "./../components/ui/card";
-import { PaymentsAPI, WebhooksAPI } from "./../api/client";
-import { loadTilledJs } from "./../lib/tilled";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowRight, CreditCard, FileText, Link2, ShieldCheck } from "lucide-react";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { PaymentsAPI, ServiceTitanAPI } from "../api/client";
+import { loadTilledJs } from "../lib/tilled";
 
-function randomIdem() {
-  return `idem_${crypto.randomUUID()}`;
+type MountedTilled = {
+  tilled?: { confirmPayment?: (clientSecret: string, payload?: unknown) => Promise<unknown> };
+  form?: { confirmPayment?: (clientSecret: string) => Promise<unknown> };
+};
+
+type AmountMode = "total" | "balance" | "custom";
+
+type CompletionInfo = {
+  status: string;
+  paymentId: string;
+  providerPaymentId?: string | null;
+  invoiceId?: string | null;
+  amount?: string | null;
+  finishedAt: string;
+};
+
+const IN_PROGRESS_STATUSES = new Set(["initiated", "processing"]);
+
+function formatCurrency(value: string | number | undefined | null) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(Number(value ?? 0));
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function coerceServiceTitanRecord(payload: Record<string, unknown> | undefined) {
+  if (!payload) return null;
+  const items = Array.isArray(payload.data) ? payload.data : [];
+  return (items[0] ?? payload) as Record<string, unknown>;
+}
+
+function getDeepValue(record: Record<string, unknown> | null, path: string) {
+  if (!record) return undefined;
+  const segments = path.split(".");
+  let current: unknown = record;
+
+  for (const key of segments) {
+    if (typeof current !== "object" || current === null || !(key in current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  if (current === undefined || current === null) return undefined;
+  const text = String(current).trim();
+  return text.length > 0 ? text : undefined;
+}
+
+function firstNonEmpty(record: Record<string, unknown> | null, keys: string[]) {
+  for (const key of keys) {
+    const value = getDeepValue(record, key);
+    if (value) return value;
+  }
+  return undefined;
+}
+
+function displayValue(value: unknown, fallback = "-") {
+  if (value === undefined || value === null) return fallback;
+  const text = String(value).trim();
+  return text.length > 0 ? text : fallback;
+}
+
+function formatNameWithId(name: unknown, id: unknown) {
+  const shownName = displayValue(name, "");
+  const shownId = displayValue(id, "");
+  if (shownName && shownId) return `${shownName} (ID: ${shownId})`;
+  if (shownName) return shownName;
+  if (shownId) return shownId;
+  return "-";
+}
+
+function FieldRow({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm">
+      <div className="text-slate-500">{label}</div>
+      <div className="text-right font-medium text-slate-900">{displayValue(value)}</div>
+    </div>
+  );
+}
+
+function clearCardMounts() {
+  const numberMount = document.getElementById("tilled-card-number");
+  const expiryMount = document.getElementById("tilled-card-expiry");
+  const cvvMount = document.getElementById("tilled-card-cvv");
+
+  if (numberMount) numberMount.innerHTML = "";
+  if (expiryMount) expiryMount.innerHTML = "";
+  if (cvvMount) cvvMount.innerHTML = "";
+
+  (window as Window & { __TPAY_TILLED_FORM__?: MountedTilled }).__TPAY_TILLED_FORM__ = undefined;
 }
 
 export default function CollectPaymentPage() {
-  const [jobId, setJobId] = useState("job_demo_1");
-  const [invoiceId, setInvoiceId] = useState("inv_demo_1");
-  const [amount, setAmount] = useState("10.00");
-  const [currency, setCurrency] = useState("USD");
-  const [idempotencyKey, setIdempotencyKey] = useState(randomIdem());
+  const [jobId, setJobId] = useState("");
+  const [amountMode, setAmountMode] = useState<AmountMode>("total");
+  const [customAmount, setCustomAmount] = useState("");
 
   const [paymentId, setPaymentId] = useState<string | null>(null);
-  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [invoiceId, setInvoiceId] = useState<string | null>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
   const [providerIntentId, setProviderIntentId] = useState<string | null>(null);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+
+  const [cardholderName, setCardholderName] = useState("");
+  const [zip, setZip] = useState("");
+  const [country, setCountry] = useState("");
 
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string>("");
+  const [completionInfo, setCompletionInfo] = useState<CompletionInfo | null>(null);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  const [isWaitingForWebhook, setIsWaitingForWebhook] = useState(false);
+  const [latestPaymentStatus, setLatestPaymentStatus] = useState<string | null>(null);
 
-  const canPay = useMemo(() => !!paymentId && !!clientSecret, [paymentId, clientSecret]);
+  const trimmedJobId = jobId.trim();
+  const canStart = Number.isFinite(Number(trimmedJobId)) && Number(trimmedJobId) > 0;
+  const needsCustomAmount = amountMode === "custom";
+  const canPrepare = canStart && (!needsCustomAmount || customAmount.trim().length > 0) && !isWaitingForWebhook;
+  const canConfirm = useMemo(
+    () => !!clientSecret && !isPreparing && !isConfirming && !isWaitingForWebhook,
+    [clientSecret, isPreparing, isConfirming, isWaitingForWebhook]
+  );
 
-  async function createIntent() {
-    setError("");
-    setStatus("Creating internal intent...");
-    const res = await PaymentsAPI.createIntent({
-      job_id: jobId,
-      invoice_id: invoiceId,
-      amount,
-      currency,
-      idempotency_key: idempotencyKey,
-    });
-    setPaymentId(res.payment_id);
-    setStatus(`Intent created: ${res.payment_id} (status=${res.status})`);
+  const parsedJobId = Number(trimmedJobId);
+  const parsedInvoiceId = Number(invoiceId ?? 0);
+
+  const jobQuery = useQuery({
+    queryKey: ["servicetitan-job", parsedJobId],
+    queryFn: () => ServiceTitanAPI.getJob(parsedJobId),
+    enabled: Number.isFinite(parsedJobId) && parsedJobId > 0,
+  });
+
+  const invoiceQuery = useQuery({
+    queryKey: ["servicetitan-invoice", parsedInvoiceId],
+    queryFn: () => ServiceTitanAPI.getInvoice(parsedInvoiceId),
+    enabled: Number.isFinite(parsedInvoiceId) && parsedInvoiceId > 0,
+  });
+
+  const paymentQuery = useQuery({
+    queryKey: ["payment-after-collect", paymentId],
+    queryFn: () => PaymentsAPI.getPayment(paymentId!),
+    enabled: Boolean(paymentId),
+  });
+
+  async function waitForWebhookStatus(paymentIdForStatus: string) {
+    setIsWaitingForWebhook(true);
+    setStatus("Payment in progress. Waiting for webhook status update...");
+
+    try {
+      for (let attempt = 0; attempt < 45; attempt += 1) {
+        const updated = await PaymentsAPI.getPayment(paymentIdForStatus);
+        const currentStatus = updated.status?.toLowerCase?.() ?? "unknown";
+        setLatestPaymentStatus(currentStatus);
+
+        if (!IN_PROGRESS_STATUSES.has(currentStatus)) {
+          setCompletionInfo({
+            status: currentStatus,
+            paymentId: updated.id,
+            providerPaymentId: updated.provider_payment_id ?? null,
+            invoiceId: updated.invoice_id ?? invoiceId,
+            amount: updated.amount,
+            finishedAt: new Date().toISOString(),
+          });
+          setStatus(`Payment ${currentStatus}.`);
+          clearCardMounts();
+          setClientSecret(null);
+          return;
+        }
+
+        await sleep(2000);
+      }
+
+      setStatus("Payment is still processing. Waiting for webhook confirmation.");
+    } finally {
+      setIsWaitingForWebhook(false);
+    }
   }
 
-  async function createProviderIntent() {
-    if (!paymentId) return;
-    setError("");
-    setStatus("Creating provider intent...");
-    const res = await PaymentsAPI.createProviderIntent(paymentId);
-
-    setProviderIntentId(res.provider_payment_intent_id ?? null);
-    setClientSecret(res.client_secret ?? null);
-
-    setStatus(
-      `Provider intent created. pi=${res.provider_payment_intent_id ?? ""} status=${res.provider_status ?? ""}`
-    );
-  }
-
-  async function mountCardForm() {
-    if (!clientSecret) return;
-    setError("");
-    setStatus("Loading Tilled.js form...");
-
+  async function mountCardForm(secret: string) {
     const cfg = await fetch("http://127.0.0.1:8000/tilled/config").then((r) => r.json());
-
     const Tilled = await loadTilledJs();
-    const tilled = new Tilled(cfg.publishable_key, cfg.account_id);
+    const tilled = new Tilled(cfg.publishable_key, cfg.account_id, { sandbox: cfg.sandbox });
+    const form = await tilled.form({ payment_method_type: "card" });
 
-    const form = tilled.form({ payment_method_type: "card" });
+    const numberMount = document.getElementById("tilled-card-number");
+    const expiryMount = document.getElementById("tilled-card-expiry");
+    const cvvMount = document.getElementById("tilled-card-cvv");
+    if (!numberMount || !expiryMount || !cvvMount) {
+      throw new Error("Card field containers are missing.");
+    }
 
-    // Clear any existing
-    const mount = document.getElementById("tilled-card-mount");
-    if (!mount) return;
-    mount.innerHTML = "";
+    numberMount.innerHTML = "";
+    expiryMount.innerHTML = "";
+    cvvMount.innerHTML = "";
 
-    const card = form.createField("card");
-    card.mount("#tilled-card-mount");
+    form.createField("cardNumber").inject("#tilled-card-number");
+    form.createField("cardExpiry").inject("#tilled-card-expiry");
+    form.createField("cardCvv").inject("#tilled-card-cvv");
+    await form.build();
 
-    (window as any).__TPAY_TILLED_FORM__ = { tilled, form };
-    setStatus("Card form ready.");
+    (window as Window & { __TPAY_TILLED_FORM__?: MountedTilled }).__TPAY_TILLED_FORM__ = { tilled, form };
+    setClientSecret(secret);
+  }
+
+  async function preparePaymentFlow() {
+    if (!canPrepare) return;
+
+    setError("");
+    setCompletionInfo(null);
+    setStatus("Preparing payment flow from job.");
+    setIsPreparing(true);
+
+    setClientSecret(null);
+    setProviderIntentId(null);
+    setLatestPaymentStatus(null);
+
+    try {
+      const payload = {
+        currency: "USD",
+        amount_source: amountMode === "balance" ? "balance" : "total",
+        amount: amountMode === "custom" ? customAmount.trim() : undefined,
+      } as const;
+
+      const start = await PaymentsAPI.startFromJob(trimmedJobId, payload);
+
+      setPaymentId(start.payment_id);
+      setInvoiceId(String(start.invoice_id));
+      setIdempotencyKey(start.idempotency_key);
+      setLatestPaymentStatus(start.status);
+      setStatus("Internal payment created. Creating provider intent.");
+
+      const provider = await PaymentsAPI.createProviderIntent(start.payment_id);
+      const secret = provider.client_secret;
+      if (!secret) {
+        throw new Error("Provider intent was created but no client_secret was returned.");
+      }
+
+      setProviderIntentId(provider.provider_payment_intent_id ?? null);
+      setStatus("Provider intent created. Loading card form.");
+
+      await mountCardForm(secret);
+      setStatus("Card form ready. Enter card details and submit payment.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to prepare payment flow.");
+    } finally {
+      setIsPreparing(false);
+    }
   }
 
   async function confirmPayment() {
-    if (!clientSecret) return;
-    setError("");
-    setStatus("Confirming payment...");
+    if (!clientSecret || !paymentId) return;
 
-    const stored = (window as any).__TPAY_TILLED_FORM__;
-    if (!stored?.form) {
-      setError("Card form not mounted yet. Click 'Load Card Form' first.");
+    setError("");
+    setStatus("Confirming payment.");
+    setIsConfirming(true);
+
+    const stored = (window as Window & { __TPAY_TILLED_FORM__?: MountedTilled }).__TPAY_TILLED_FORM__;
+
+    if (!stored?.tilled && !stored?.form) {
+      setError("Card form is not mounted. Click 'Load job and start payment' first.");
+      setIsConfirming(false);
       return;
     }
 
-    // confirmPayment signature depends on tilled.js; we use generic call
-    // If your previous HTML test uses a slightly different call, paste it and I’ll align.
-    const result = await stored.form.confirmPayment(clientSecret);
-    setStatus(`Confirm result: ${JSON.stringify(result)}`);
-  }
+    try {
+      let result: unknown;
 
-  async function pollStatus() {
-    if (!paymentId) return;
-    setError("");
-    setStatus("Polling backend status...");
+      if (stored?.tilled?.confirmPayment) {
+        result = await stored.tilled.confirmPayment(clientSecret, {
+          payment_method: {
+            type: "card",
+            billing_details: {
+              name: cardholderName,
+              address: {
+                zip,
+                country,
+              },
+            },
+          },
+        });
+      } else if (stored?.form?.confirmPayment) {
+        result = await stored.form.confirmPayment(clientSecret);
+      } else {
+        throw new Error("No compatible confirmPayment method found in Tilled SDK object.");
+      }
 
-    const start = Date.now();
-    while (Date.now() - start < 30000) {
-      const p = await PaymentsAPI.getPayment(paymentId);
-      setStatus(`Payment status: ${p.status}`);
-      if (p.status === "succeeded" || p.status === "failed") break;
-      await new Promise((r) => setTimeout(r, 2000));
+      const resultObj = (typeof result === "object" && result !== null ? result : {}) as Record<string, unknown>;
+      const resultError =
+        displayValue(resultObj.error, "") ||
+        displayValue(resultObj.last_payment_error, "") ||
+        displayValue(resultObj.message, "");
+      if (resultError) {
+        throw new Error(resultError);
+      }
+
+      await waitForWebhookStatus(paymentId);
+    } catch (err) {
+      if (err instanceof Error) {
+        setError(`Payment confirmation failed: ${err.message}`);
+      } else {
+        setError("Payment confirmation failed.");
+      }
+      setIsWaitingForWebhook(false);
+    } finally {
+      setIsConfirming(false);
     }
   }
 
-  async function viewWebhookEvents() {
-    if (!paymentId) return;
-    setError("");
-    const events = await WebhooksAPI.listEvents(`?limit=10`);
-    // If your backend supports filtering by payment_id, switch to:
-    // const events = await WebhooksAPI.listEvents(`?payment_id=${paymentId}&limit=10`);
-    setStatus(`Latest webhook events: ${JSON.stringify(events, null, 2)}`);
-  }
+  const jobRecord = coerceServiceTitanRecord(jobQuery.data as Record<string, unknown> | undefined);
+  const invoiceRecord = coerceServiceTitanRecord(invoiceQuery.data as unknown as Record<string, unknown> | undefined);
+
+  const customerName = firstNonEmpty(jobRecord, ["customer.name", "customerName", "customer.displayName"]);
+  const customerId = firstNonEmpty(jobRecord, ["customer.id", "customerId"]);
+  const technicianName = firstNonEmpty(jobRecord, ["technician.name", "technicianName", "assignedTechnician.name"]);
+  const technicianId = firstNonEmpty(jobRecord, ["technician.id", "technicianId", "assignedTechnician.id"]);
+  const businessUnitName = firstNonEmpty(jobRecord, ["businessUnit.name", "businessUnitName"]);
+  const businessUnitId = firstNonEmpty(jobRecord, ["businessUnit.id", "businessUnitId"]);
+  const locationName = firstNonEmpty(jobRecord, ["location.name", "locationName"]);
+  const locationId = firstNonEmpty(jobRecord, ["location.id", "locationId"]);
+
+  const jobInfo = {
+    id: firstNonEmpty(jobRecord, ["id", "jobId", "job_id"]) ?? trimmedJobId,
+    status: firstNonEmpty(jobRecord, ["jobStatus", "status", "statusName"]),
+    appointment: firstNonEmpty(jobRecord, ["appointmentStatus", "appointment.status", "appointment_status"]),
+    customer: formatNameWithId(customerName, customerId),
+    technician: formatNameWithId(technicianName, technicianId),
+    businessUnit: formatNameWithId(businessUnitName, businessUnitId),
+    location: formatNameWithId(locationName, locationId),
+  };
+
+  const invoiceInfo = {
+    id: firstNonEmpty(invoiceRecord, ["id", "invoiceId", "invoice_id"]) ?? invoiceId,
+    number: firstNonEmpty(invoiceRecord, ["invoiceNumber", "number", "invoiceNo", "displayNumber"]),
+    total: firstNonEmpty(invoiceRecord, ["total", "invoiceTotal", "amount"]),
+    balance: firstNonEmpty(invoiceRecord, ["balance", "balanceDue", "amountDue"]),
+    tax: firstNonEmpty(invoiceRecord, ["tax", "taxAmount"]),
+    dueDate: firstNonEmpty(invoiceRecord, ["dueDate", "due_on", "due"]),
+    createdOn: firstNonEmpty(invoiceRecord, ["createdOn", "createdAt", "created_at"]),
+  };
+
+  const shownStatus = latestPaymentStatus ?? paymentQuery.data?.status;
+  const showCardEntry = Boolean(clientSecret || isPreparing || isConfirming || isWaitingForWebhook);
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Collect Payment</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <div className="text-xs text-gray-600 mb-1">Job ID</div>
-              <Input value={jobId} onChange={(e) => setJobId(e.target.value)} />
+    <div className="space-y-6">
+      <section className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        <Card className="overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(96,165,250,0.18),_transparent_30%),linear-gradient(135deg,#ffffff_0%,#f7fbff_45%,#fdf8ef_100%)]">
+          <CardHeader>
+            <CardTitle>Collect payment</CardTitle>
+            <CardDescription>
+              Technician enters job ID, picks amount type, we prepare payment automatically, then submit on confirm.
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="space-y-5">
+            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+              <span className="rounded-full bg-white px-3 py-1.5">Technician enters job</span>
+              <ArrowRight className="h-4 w-4 text-slate-400" />
+              <span className="rounded-full bg-white px-3 py-1.5">TPay prepares payment</span>
+              <ArrowRight className="h-4 w-4 text-slate-400" />
+              <span className="rounded-full bg-white px-3 py-1.5">Confirm card payment</span>
             </div>
-            <div>
-              <div className="text-xs text-gray-600 mb-1">Invoice ID</div>
-              <Input value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} />
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">ServiceTitan job ID</div>
+                <Input
+                  value={jobId}
+                  onChange={(e) => setJobId(e.target.value)}
+                  placeholder="e.g. 2631227623"
+                />
+              </div>
+
+              <div>
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Amount type</div>
+                <select
+                  value={amountMode}
+                  onChange={(e) => setAmountMode(e.target.value as AmountMode)}
+                  className="w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="total">Invoice total</option>
+                  <option value="balance">Invoice balance</option>
+                  <option value="custom">Custom amount</option>
+                </select>
+              </div>
+
+              {amountMode === "custom" ? (
+                <div className="md:col-span-2">
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Custom amount</div>
+                  <Input
+                    value={customAmount}
+                    onChange={(e) => setCustomAmount(e.target.value)}
+                    placeholder="e.g. 59.99"
+                  />
+                </div>
+              ) : null}
             </div>
-            <div>
-              <div className="text-xs text-gray-600 mb-1">Amount</div>
-              <Input value={amount} onChange={(e) => setAmount(e.target.value)} />
+
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={preparePaymentFlow} disabled={!canPrepare || isPreparing}>
+                {isPreparing ? "Preparing..." : "Load job and start payment"}
+              </Button>
             </div>
-            <div>
-              <div className="text-xs text-gray-600 mb-1">Currency</div>
-              <Input value={currency} onChange={(e) => setCurrency(e.target.value)} />
+
+            {showCardEntry ? (
+              <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-950">
+                  <CreditCard className="h-4 w-4 text-slate-500" />
+                  Tilled card entry
+                </div>
+
+                <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                  <div>
+                    <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Cardholder name</div>
+                    <Input
+                      value={cardholderName}
+                      onChange={(e) => setCardholderName(e.target.value)}
+                      placeholder="e.g. Joe Doe"
+                    />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">ZIP</div>
+                    <Input value={zip} onChange={(e) => setZip(e.target.value)} placeholder="e.g. 80021" />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Country</div>
+                    <Input
+                      value={country}
+                      onChange={(e) => setCountry(e.target.value.toUpperCase())}
+                      placeholder="e.g. US"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div>
+                    <div className="mb-1 text-xs text-slate-500">Card number</div>
+                    <div id="tilled-card-number" className="h-12 rounded-xl border border-slate-200 px-3" />
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <div className="mb-1 text-xs text-slate-500">Expiry</div>
+                      <div id="tilled-card-expiry" className="h-12 rounded-xl border border-slate-200 px-3" />
+                    </div>
+                    <div>
+                      <div className="mb-1 text-xs text-slate-500">CVV</div>
+                      <div id="tilled-card-cvv" className="h-12 rounded-xl border border-slate-200 px-3" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex justify-end">
+                  <Button onClick={confirmPayment} disabled={!canConfirm}>
+                    {isConfirming ? "Confirming..." : "Confirm payment"}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="rounded-3xl bg-slate-950 p-4 text-xs text-slate-100 space-y-2">
+              {isWaitingForWebhook ? (
+                <div className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-amber-300" />
+                  <span>Payment in progress. Waiting for webhook status...</span>
+                </div>
+              ) : null}
+              {completionInfo ? (
+                <div className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 p-3 text-emerald-100">
+                  <div className="font-semibold">Payment {completionInfo.status}</div>
+                  <div>Payment ID: {completionInfo.paymentId}</div>
+                  <div>Provider Payment: {displayValue(completionInfo.providerPaymentId)}</div>
+                  <div>Invoice ID: {displayValue(completionInfo.invoiceId)}</div>
+                  <div>Amount: {formatCurrency(completionInfo.amount)}</div>
+                  <div>Completed at: {formatDateTime(completionInfo.finishedAt)}</div>
+                </div>
+              ) : null}
+              {error ? <div className="whitespace-pre-wrap">ERROR: {error}</div> : null}
+              <div className="whitespace-pre-wrap">{status || "No action yet."}</div>
             </div>
-            <div className="md:col-span-2">
-              <div className="text-xs text-gray-600 mb-1">Idempotency Key</div>
-              <div className="flex gap-2">
-                <Input value={idempotencyKey} onChange={(e) => setIdempotencyKey(e.target.value)} />
-                <Button variant="outline" onClick={() => setIdempotencyKey(randomIdem())}>
-                  Generate
-                </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Linked records</CardTitle>
+            <CardDescription>Useful job, invoice, and payment context for the technician.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-950">
+                <FileText className="h-4 w-4 text-slate-500" />
+                ServiceTitan job
+              </div>
+              <div className="space-y-2">
+                <FieldRow label="Job ID" value={jobInfo.id} />
+                <FieldRow label="Status" value={jobInfo.status} />
+                <FieldRow label="Appointment" value={jobInfo.appointment} />
+                <FieldRow label="Customer" value={jobInfo.customer} />
+                <FieldRow label="Technician" value={jobInfo.technician} />
+                <FieldRow label="Business unit" value={jobInfo.businessUnit} />
+                <FieldRow label="Location" value={jobInfo.location} />
               </div>
             </div>
-          </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={createIntent}>1) Create Payment Intent</Button>
-            <Button variant="secondary" onClick={createProviderIntent} disabled={!paymentId}>
-              2) Create Provider Intent
-            </Button>
-            <Button variant="outline" onClick={mountCardForm} disabled={!clientSecret}>
-              3) Load Card Form
-            </Button>
-            <Button variant="default" onClick={confirmPayment} disabled={!canPay}>
-              4) Confirm Payment
-            </Button>
-            <Button variant="outline" onClick={pollStatus} disabled={!paymentId}>
-              Poll Status
-            </Button>
-            <Button variant="outline" onClick={viewWebhookEvents} disabled={!paymentId}>
-              View Webhook Events
-            </Button>
-          </div>
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-950">
+                <Link2 className="h-4 w-4 text-slate-500" />
+                ServiceTitan invoice
+              </div>
+              <div className="space-y-2">
+                <FieldRow label="Invoice ID" value={invoiceInfo.id} />
+                <FieldRow label="Invoice number" value={invoiceInfo.number} />
+                <FieldRow label="Total" value={invoiceInfo.total} />
+                <FieldRow label="Balance" value={invoiceInfo.balance} />
+                <FieldRow label="Tax" value={invoiceInfo.tax} />
+                <FieldRow label="Due date" value={invoiceInfo.dueDate} />
+                <FieldRow label="Created on" value={invoiceInfo.createdOn} />
+              </div>
+            </div>
 
-          <div className="text-sm">
-            <div className="text-gray-600">payment_id</div>
-            <div className="font-mono text-xs break-all">{paymentId ?? "-"}</div>
-            <div className="text-gray-600 mt-2">provider_payment_intent_id</div>
-            <div className="font-mono text-xs break-all">{providerIntentId ?? "-"}</div>
-            <div className="text-gray-600 mt-2">client_secret</div>
-            <div className="font-mono text-xs break-all">{clientSecret ?? "-"}</div>
-          </div>
-
-          <div className="rounded-md bg-gray-950 text-gray-100 p-3 text-xs whitespace-pre-wrap">
-            {error ? `ERROR: ${error}\n\n` : ""}
-            {status}
-          </div>
-
-          <div className="rounded-md border border-gray-200 p-3">
-            <div className="text-sm font-medium mb-2">Card Form</div>
-            <div id="tilled-card-mount" />
-          </div>
-        </CardContent>
-      </Card>
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-950">
+                <ShieldCheck className="h-4 w-4 text-slate-500" />
+                TPay payment
+              </div>
+              <div className="space-y-2 text-sm text-slate-600">
+                <div>Payment ID: {displayValue(paymentId)}</div>
+                <div>Provider intent: {displayValue(providerIntentId)}</div>
+                <div>Status: {displayValue(shownStatus, "Not created")}</div>
+                <div>Amount: {formatCurrency(paymentQuery.data?.amount)}</div>
+                <div>Idempotency key: {displayValue(idempotencyKey)}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>
     </div>
   );
 }
