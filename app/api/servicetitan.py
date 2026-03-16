@@ -294,6 +294,78 @@ def get_technicians_api(
     except ServiceTitanAPIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
     
+@router.get("/locations/{location_id}")
+def get_location_by_id(
+    location_id: int,
+    tenant: str = Query(default=settings.ST_TENANT_ID),
+):
+    client = ServiceTitanClient()
+    try:
+        return client.get_locations(
+            tenant=tenant,
+            params={"ids": str(location_id), "page": 1, "pageSize": 1, "includeTotal": True},
+        )
+    except ServiceTitanAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    except ServiceTitanAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@router.get("/business-units/{business_unit_id}")
+def get_business_unit_by_id(
+    business_unit_id: int,
+    tenant: str = Query(default=settings.ST_TENANT_ID),
+):
+    def _extract_records(payload: dict) -> list[dict]:
+        if not isinstance(payload, dict):
+            return []
+        for key in ("data", "items", "results", "records", "businessUnits"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return [v for v in value if isinstance(v, dict)]
+        return [payload]
+
+    def _match_id(records: list[dict]) -> dict | None:
+        wanted = str(business_unit_id)
+        for record in records:
+            rid = record.get("id")
+            if rid is not None and str(rid) == wanted:
+                return record
+        return None
+
+    client = ServiceTitanClient()
+    try:
+        # Preferred call when ids filtering is supported by the connected tenant/version.
+        return client.get_business_units(
+            tenant=tenant,
+            params={"ids": str(business_unit_id), "page": 1, "pageSize": 1, "includeTotal": True},
+        )
+    except ServiceTitanAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    except ServiceTitanAPIError as exc:
+        # Fallback: some ServiceTitan setups reject ids filtering for business units.
+        try:
+            page = 1
+            page_size = 200
+            max_pages = 20
+            while page <= max_pages:
+                listing = client.get_business_units(
+                    tenant=tenant,
+                    params={"page": page, "pageSize": page_size, "includeTotal": True},
+                )
+                records = _extract_records(listing)
+                matched = _match_id(records)
+                if matched:
+                    return matched
+                # Stop early when we hit the end of returned records.
+                if len(records) < page_size:
+                    break
+                page += 1
+        except ServiceTitanAPIError:
+            pass
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @router.get("/payment-types")
 def get_payement_types(
     tenant: str = Query(default=settings.ST_TENANT_ID),

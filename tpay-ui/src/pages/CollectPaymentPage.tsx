@@ -45,8 +45,21 @@ function sleep(ms: number) {
 
 function coerceServiceTitanRecord(payload: Record<string, unknown> | undefined) {
   if (!payload) return null;
-  const items = Array.isArray(payload.data) ? payload.data : [];
-  return (items[0] ?? payload) as Record<string, unknown>;
+  const data = payload.data;
+  if (Array.isArray(data)) {
+    return (data[0] ?? null) as Record<string, unknown> | null;
+  }
+
+  // Only unwrap explicit list envelopes; do not guess from arbitrary arrays on rich objects (like jobs).
+  const envelopeArrayKeys = ["items", "results", "records", "businessUnits", "locations", "customers"] as const;
+  for (const key of envelopeArrayKeys) {
+    const value = payload[key];
+    if (Array.isArray(value)) {
+      return (value[0] ?? null) as Record<string, unknown> | null;
+    }
+  }
+
+  return payload;
 }
 
 function getDeepValue(record: Record<string, unknown> | null, path: string) {
@@ -74,6 +87,15 @@ function firstNonEmpty(record: Record<string, unknown> | null, keys: string[]) {
   return undefined;
 }
 
+function firstNonIdLike(record: Record<string, unknown> | null, keys: string[]) {
+  for (const key of keys) {
+    const value = getDeepValue(record, key);
+    if (!value) continue;
+    if (!/^\d+$/.test(value)) return value;
+  }
+  return undefined;
+}
+
 function displayValue(value: unknown, fallback = "-") {
   if (value === undefined || value === null) return fallback;
   const text = String(value).trim();
@@ -87,6 +109,19 @@ function formatNameWithId(name: unknown, id: unknown) {
   if (shownName) return shownName;
   if (shownId) return shownId;
   return "-";
+}
+
+function formatLocationAddress(record: Record<string, unknown> | null) {
+  const line1 = firstNonEmpty(record, ["address.street", "address.street1", "address.line1", "street", "street1"]);
+  const line2 = firstNonEmpty(record, ["address.street2", "address.line2", "street2"]);
+  const city = firstNonEmpty(record, ["address.city", "city"]);
+  const state = firstNonEmpty(record, ["address.state", "state", "address.province", "province"]);
+  const postal = firstNonEmpty(record, ["address.zip", "address.postalCode", "zip", "postalCode"]);
+
+  const street = [line1, line2].filter(Boolean).join(" ").trim();
+  const locality = [city, state, postal].filter(Boolean).join(", ").trim();
+  const combined = [street, locality].filter(Boolean).join(" | ").trim();
+  return combined.length > 0 ? combined : undefined;
 }
 
 function FieldRow({ label, value }: { label: string; value: unknown }) {
@@ -330,14 +365,83 @@ export default function CollectPaymentPage() {
   const jobRecord = coerceServiceTitanRecord(jobQuery.data as Record<string, unknown> | undefined);
   const invoiceRecord = coerceServiceTitanRecord(invoiceQuery.data as unknown as Record<string, unknown> | undefined);
 
-  const customerName = firstNonEmpty(jobRecord, ["customer.name", "customerName", "customer.displayName"]);
   const customerId = firstNonEmpty(jobRecord, ["customer.id", "customerId"]);
+  const parsedCustomerId = Number(customerId ?? 0);
+  const customerQuery = useQuery({
+    queryKey: ["servicetitan-customer", parsedCustomerId],
+    queryFn: () => ServiceTitanAPI.getCustomer(parsedCustomerId),
+    enabled: Number.isFinite(parsedCustomerId) && parsedCustomerId > 0,
+  });
+  const customerRecord = coerceServiceTitanRecord(customerQuery.data as unknown as Record<string, unknown> | undefined);
+
+  const customerName =
+    firstNonEmpty(customerRecord, ["name", "displayName", "firstName"]) ??
+    firstNonEmpty(jobRecord, ["customer.name", "customerName", "customer.displayName"]);
+
   const technicianName = firstNonEmpty(jobRecord, ["technician.name", "technicianName", "assignedTechnician.name"]);
   const technicianId = firstNonEmpty(jobRecord, ["technician.id", "technicianId", "assignedTechnician.id"]);
-  const businessUnitName = firstNonEmpty(jobRecord, ["businessUnit.name", "businessUnitName"]);
-  const businessUnitId = firstNonEmpty(jobRecord, ["businessUnit.id", "businessUnitId"]);
-  const locationName = firstNonEmpty(jobRecord, ["location.name", "locationName"]);
-  const locationId = firstNonEmpty(jobRecord, ["location.id", "locationId"]);
+  const locationId =
+    firstNonEmpty(jobRecord, ["location.id", "locationId"]) ??
+    firstNonEmpty(invoiceRecord, ["location.id", "locationId"]);
+  const parsedLocationId = Number(locationId ?? 0);
+  const locationQuery = useQuery({
+    queryKey: ["servicetitan-location", parsedLocationId],
+    queryFn: () => ServiceTitanAPI.getLocation(parsedLocationId),
+    enabled: Number.isFinite(parsedLocationId) && parsedLocationId > 0,
+  });
+  const locationRecord = coerceServiceTitanRecord(locationQuery.data as unknown as Record<string, unknown> | undefined);
+  const locationAddress = formatLocationAddress(locationRecord);
+  const locationNameFromRecord =
+    firstNonEmpty(locationRecord, ["displayName", "locationName", "location.displayName", "location.name", "name"]) ??
+    firstNonEmpty(jobRecord, ["location.name", "locationName", "locationDisplayName"]) ??
+    firstNonEmpty(invoiceRecord, ["location.name", "locationName", "locationDisplayName"]);
+  const normalizedCustomerName = displayValue(customerName, "").toLowerCase();
+  const normalizedLocationName = displayValue(locationNameFromRecord, "").toLowerCase();
+  const locationName =
+    locationAddress && normalizedLocationName && normalizedLocationName === normalizedCustomerName
+      ? locationAddress
+      : locationNameFromRecord ?? locationAddress;
+  const businessUnitId =
+    firstNonEmpty(jobRecord, ["businessUnit.id", "businessUnitId"]) ??
+    firstNonEmpty(invoiceRecord, ["businessUnit.id", "businessUnitId"]) ??
+    firstNonEmpty(locationRecord, ["businessUnit.id", "businessUnitId", "businessUnitIds.0", "businessUnits.0.id"]);
+  const parsedBusinessUnitId = Number(businessUnitId ?? 0);
+  const businessUnitQuery = useQuery({
+    queryKey: ["servicetitan-business-unit", parsedBusinessUnitId],
+    queryFn: () => ServiceTitanAPI.getBusinessUnit(parsedBusinessUnitId),
+    enabled: Number.isFinite(parsedBusinessUnitId) && parsedBusinessUnitId > 0,
+  });
+  const businessUnitRecord = coerceServiceTitanRecord(
+    businessUnitQuery.data as unknown as Record<string, unknown> | undefined
+  );
+  const businessUnitName =
+    firstNonIdLike(businessUnitRecord, [
+      "name",
+      "displayName",
+      "officialName",
+      "shortName",
+      "businessUnitName",
+      "businessUnitDisplayName",
+      "businessUnit.name",
+    ]) ??
+    firstNonIdLike(jobRecord, [
+      "businessUnit.name",
+      "businessUnitName",
+      "businessUnitDisplayName",
+      "businessUnit",
+    ]) ??
+    firstNonIdLike(invoiceRecord, [
+      "businessUnit.name",
+      "businessUnitName",
+      "businessUnitDisplayName",
+      "businessUnit",
+    ]) ??
+    firstNonIdLike(locationRecord, [
+      "businessUnit.name",
+      "businessUnitName",
+      "businessUnitDisplayName",
+      "businessUnits.0.name",
+    ]);
 
   const jobInfo = {
     id: firstNonEmpty(jobRecord, ["id", "jobId", "job_id"]) ?? trimmedJobId,
@@ -345,8 +449,8 @@ export default function CollectPaymentPage() {
     appointment: firstNonEmpty(jobRecord, ["appointmentStatus", "appointment.status", "appointment_status"]),
     customer: formatNameWithId(customerName, customerId),
     technician: formatNameWithId(technicianName, technicianId),
-    businessUnit: formatNameWithId(businessUnitName, businessUnitId),
-    location: formatNameWithId(locationName, locationId),
+    businessUnit: displayValue(businessUnitName ?? businessUnitId),
+    location: displayValue(locationName),
   };
 
   const invoiceInfo = {

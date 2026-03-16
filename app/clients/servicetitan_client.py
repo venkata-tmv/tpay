@@ -208,6 +208,30 @@ class ServiceTitanClient:
 
         return resp.json()
     
+    def get_locations(self, *, tenant: str, params: dict[str, Any]) -> dict[str, Any]:
+        url = f"{self.api_base}/crm/v2/tenant/{tenant}/locations"
+        try:
+            resp = httpx.get(url, headers=self._headers(), params=params, timeout=30)
+        except httpx.HTTPError as exc:
+            raise ServiceTitanAPIError(f"ServiceTitan request failed: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise ServiceTitanAPIError(f"ServiceTitan error {resp.status_code}: {resp.text}")
+
+        return resp.json()
+
+    def get_business_units(self, *, tenant: str, params: dict[str, Any]) -> dict[str, Any]:
+        url = f"{self.api_base}/settings/v2/tenant/{tenant}/business-units"
+        try:
+            resp = httpx.get(url, headers=self._headers(), params=params, timeout=30)
+        except httpx.HTTPError as exc:
+            raise ServiceTitanAPIError(f"ServiceTitan request failed: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise ServiceTitanAPIError(f"ServiceTitan error {resp.status_code}: {resp.text}")
+
+        return resp.json()
+
     def create_payment(self, *, tenant: str, payload: dict[str, Any]) -> dict[str, Any]:
         """
         POST /accounting/v2/tenant/{tenant}/payments
