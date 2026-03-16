@@ -228,4 +228,22 @@ export const ServiceTitanAPI = {
       `/servicetitan/invoices/${invoiceId}`,
       { method: "GET" }
     ),
+
+  getCustomer: (customerId: string | number) =>
+    apiFetch<ServiceTitanEnvelope<Record<string, unknown>>>(
+      `/servicetitan/customers/${customerId}`,
+      { method: "GET" }
+    ),
+
+  getLocation: (locationId: string | number) =>
+    apiFetch<ServiceTitanEnvelope<Record<string, unknown>>>(
+      `/servicetitan/locations/${locationId}`,
+      { method: "GET" }
+    ),
+
+  getBusinessUnit: (businessUnitId: string | number) =>
+    apiFetch<ServiceTitanEnvelope<Record<string, unknown>>>(
+      `/servicetitan/business-units/${businessUnitId}`,
+      { method: "GET" }
+    ),
 };
