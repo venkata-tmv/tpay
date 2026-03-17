@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, CreditCard, FileText, Link2, ShieldCheck } from "lucide-react";
+import { ArrowRight, CreditCard, FileText, ShieldCheck } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -146,7 +147,10 @@ function clearCardMounts() {
 }
 
 export default function CollectPaymentPage() {
+  const [searchParams] = useSearchParams();
+  const autoLoadedJobRef = useRef<string | null>(null);
   const [jobId, setJobId] = useState("");
+  const [loadedJobId, setLoadedJobId] = useState<string | null>(null);
   const [amountMode, setAmountMode] = useState<AmountMode>("total");
   const [customAmount, setCustomAmount] = useState("");
 
@@ -159,19 +163,57 @@ export default function CollectPaymentPage() {
   const [cardholderName, setCardholderName] = useState("");
   const [zip, setZip] = useState("");
   const [country, setCountry] = useState("");
+  const [isAmountConfirmed, setIsAmountConfirmed] = useState(false);
 
   const [status, setStatus] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [completionInfo, setCompletionInfo] = useState<CompletionInfo | null>(null);
   const [isPreparing, setIsPreparing] = useState(false);
+  const [isLoadingJob, setIsLoadingJob] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [isWaitingForWebhook, setIsWaitingForWebhook] = useState(false);
   const [latestPaymentStatus, setLatestPaymentStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    const prefillJobId = searchParams.get("jobId")?.trim();
+    if (!prefillJobId) return;
+    if (prefillJobId !== jobId) {
+      setJobId(prefillJobId);
+    }
+  }, [searchParams, jobId]);
+
+  useEffect(() => {
+    setLoadedJobId(null);
+    setInvoiceId(null);
+    setPaymentId(null);
+    setIdempotencyKey(null);
+    setProviderIntentId(null);
+    setClientSecret(null);
+    setLatestPaymentStatus(null);
+    setIsAmountConfirmed(false);
+    clearCardMounts();
+    autoLoadedJobRef.current = null;
+  }, [jobId]);
+
+  useEffect(() => {
+    if (loadedJobId && invoiceId) {
+      setIsAmountConfirmed(false);
+    }
+  }, [amountMode, customAmount, loadedJobId, invoiceId]);
 
   const trimmedJobId = jobId.trim();
   const canStart = Number.isFinite(Number(trimmedJobId)) && Number(trimmedJobId) > 0;
   const needsCustomAmount = amountMode === "custom";
   const canPrepare = canStart && (!needsCustomAmount || customAmount.trim().length > 0) && !isWaitingForWebhook;
+  const canLoadJob = canStart && !isLoadingJob && !isPreparing && !isConfirming && !isWaitingForWebhook;
+  const canStartPayment =
+    canPrepare &&
+    loadedJobId === trimmedJobId &&
+    Boolean(invoiceId) &&
+    isAmountConfirmed &&
+    !isLoadingJob &&
+    !isPreparing &&
+    !isConfirming;
   const canConfirm = useMemo(
     () => !!clientSecret && !isPreparing && !isConfirming && !isWaitingForWebhook,
     [clientSecret, isPreparing, isConfirming, isWaitingForWebhook]
@@ -258,12 +300,63 @@ export default function CollectPaymentPage() {
     setClientSecret(secret);
   }
 
-  async function preparePaymentFlow() {
-    if (!canPrepare) return;
+  async function loadJobAndInvoice() {
+    if (!canLoadJob) return;
 
     setError("");
     setCompletionInfo(null);
-    setStatus("Preparing payment flow from job.");
+    setStatus("Loading job and invoice details.");
+    setIsLoadingJob(true);
+
+    try {
+      const jobResponse = await jobQuery.refetch();
+      const loadedRecord = coerceServiceTitanRecord(jobResponse.data as Record<string, unknown> | undefined);
+      const resolvedInvoiceId = firstNonEmpty(loadedRecord, [
+        "invoiceId",
+        "invoice.id",
+        "invoiceIds.0",
+        "invoices.0.id",
+      ]);
+
+      if (!resolvedInvoiceId) {
+        throw new Error("No invoice found on this job.");
+      }
+
+      setInvoiceId(String(resolvedInvoiceId));
+      await ServiceTitanAPI.getInvoice(String(resolvedInvoiceId));
+      setLoadedJobId(trimmedJobId);
+      setIsAmountConfirmed(false);
+      setStatus("Job and invoice loaded. Review amount and click Start payment.");
+    } catch (err) {
+      setLoadedJobId(null);
+      setInvoiceId(null);
+      setError(err instanceof Error ? err.message : "Unable to load job details.");
+    } finally {
+      setIsLoadingJob(false);
+    }
+  }
+
+  const queryJobId = searchParams.get("jobId")?.trim() ?? "";
+  useEffect(() => {
+    if (!queryJobId) return;
+    if (trimmedJobId !== queryJobId) return;
+    if (!canLoadJob) return;
+    if (loadedJobId === queryJobId) {
+      autoLoadedJobRef.current = queryJobId;
+      return;
+    }
+    if (autoLoadedJobRef.current === queryJobId) return;
+
+    autoLoadedJobRef.current = queryJobId;
+    void loadJobAndInvoice();
+  }, [queryJobId, trimmedJobId, canLoadJob, loadedJobId, loadJobAndInvoice]);
+
+  async function preparePaymentFlow() {
+    if (!canStartPayment) return;
+
+    setError("");
+    setCompletionInfo(null);
+    setStatus("Creating internal payment and payment intent.");
     setIsPreparing(true);
 
     setClientSecret(null);
@@ -283,7 +376,7 @@ export default function CollectPaymentPage() {
       setInvoiceId(String(start.invoice_id));
       setIdempotencyKey(start.idempotency_key);
       setLatestPaymentStatus(start.status);
-      setStatus("Internal payment created. Creating provider intent.");
+      setStatus("Internal payment created. Creating payment intent.");
 
       const provider = await PaymentsAPI.createProviderIntent(start.payment_id);
       const secret = provider.client_secret;
@@ -297,7 +390,7 @@ export default function CollectPaymentPage() {
       await mountCardForm(secret);
       setStatus("Card form ready. Enter card details and submit payment.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to prepare payment flow.");
+      setError(err instanceof Error ? err.message : "Unable to start payment flow.");
     } finally {
       setIsPreparing(false);
     }
@@ -313,7 +406,7 @@ export default function CollectPaymentPage() {
     const stored = (window as Window & { __TPAY_TILLED_FORM__?: MountedTilled }).__TPAY_TILLED_FORM__;
 
     if (!stored?.tilled && !stored?.form) {
-      setError("Card form is not mounted. Click 'Load job and start payment' first.");
+      setError("Card form is not mounted. Load job/invoice and click 'Start payment' first.");
       setIsConfirming(false);
       return;
     }
@@ -337,7 +430,7 @@ export default function CollectPaymentPage() {
       } else if (stored?.form?.confirmPayment) {
         result = await stored.form.confirmPayment(clientSecret);
       } else {
-        throw new Error("No compatible confirmPayment method found in Tilled SDK object.");
+        throw new Error("No compatible confirmPayment method found in card SDK object.");
       }
 
       const resultObj = (typeof result === "object" && result !== null ? result : {}) as Record<string, unknown>;
@@ -462,6 +555,10 @@ export default function CollectPaymentPage() {
     dueDate: firstNonEmpty(invoiceRecord, ["dueDate", "due_on", "due"]),
     createdOn: firstNonEmpty(invoiceRecord, ["createdOn", "createdAt", "created_at"]),
   };
+  const hasLoadedInvoiceContext = loadedJobId === trimmedJobId && Boolean(invoiceId);
+  const selectedAmountLabel =
+    amountMode === "total" ? "Selected amount (invoice total)" : amountMode === "balance" ? "Selected amount (invoice balance)" : "Selected amount (custom)";
+  const selectedAmountValue = amountMode === "custom" ? customAmount : amountMode === "balance" ? invoiceInfo.balance : invoiceInfo.total;
 
   const shownStatus = latestPaymentStatus ?? paymentQuery.data?.status;
   const showCardEntry = Boolean(clientSecret || isPreparing || isConfirming || isWaitingForWebhook);
@@ -473,7 +570,7 @@ export default function CollectPaymentPage() {
           <CardHeader>
             <CardTitle>Collect payment</CardTitle>
             <CardDescription>
-              Technician enters job ID, picks amount type, we prepare payment automatically, then submit on confirm.
+              Technician loads job/invoice first, then starts payment flow and confirms card.
             </CardDescription>
           </CardHeader>
 
@@ -481,14 +578,16 @@ export default function CollectPaymentPage() {
             <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
               <span className="rounded-full bg-white px-3 py-1.5">Technician enters job</span>
               <ArrowRight className="h-4 w-4 text-slate-400" />
-              <span className="rounded-full bg-white px-3 py-1.5">TPay prepares payment</span>
+              <span className="rounded-full bg-white px-3 py-1.5">Load job + invoice</span>
+              <ArrowRight className="h-4 w-4 text-slate-400" />
+              <span className="rounded-full bg-white px-3 py-1.5">Start payment</span>
               <ArrowRight className="h-4 w-4 text-slate-400" />
               <span className="rounded-full bg-white px-3 py-1.5">Confirm card payment</span>
             </div>
 
             <div className="grid gap-4 md:grid-cols-2">
               <div>
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">ServiceTitan job ID</div>
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Job ID</div>
                 <Input
                   value={jobId}
                   onChange={(e) => setJobId(e.target.value)}
@@ -522,16 +621,41 @@ export default function CollectPaymentPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button onClick={preparePaymentFlow} disabled={!canPrepare || isPreparing}>
-                {isPreparing ? "Preparing..." : "Load job and start payment"}
+              <Button onClick={loadJobAndInvoice} disabled={!canLoadJob}>
+                {isLoadingJob ? "Loading..." : "Load job & invoice"}
+              </Button>
+              <Button onClick={preparePaymentFlow} disabled={!canStartPayment || isPreparing}>
+                {isPreparing ? "Starting..." : "Start payment"}
               </Button>
             </div>
+
+            {hasLoadedInvoiceContext ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="mb-2 text-sm font-semibold text-slate-950">Invoice preview</div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <FieldRow label="Customer" value={jobInfo.customer} />
+                  <FieldRow label="Location" value={jobInfo.location} />
+                  <FieldRow label="Invoice number" value={invoiceInfo.number} />
+                  <FieldRow label="Invoice total" value={formatCurrency(invoiceInfo.total)} />
+                  <FieldRow label="Invoice balance" value={formatCurrency(invoiceInfo.balance)} />
+                  <FieldRow label={selectedAmountLabel} value={formatCurrency(selectedAmountValue)} />
+                </div>
+                <label className="mt-3 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={isAmountConfirmed}
+                    onChange={(e) => setIsAmountConfirmed(e.target.checked)}
+                  />
+                  I confirmed this amount with the customer.
+                </label>
+              </div>
+            ) : null}
 
             {showCardEntry ? (
               <div className="rounded-3xl border border-slate-200 bg-white p-4">
                 <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-950">
                   <CreditCard className="h-4 w-4 text-slate-500" />
-                  Tilled card entry
+                  Card entry
                 </div>
 
                 <div className="mb-4 grid gap-3 sm:grid-cols-3">
@@ -593,7 +717,7 @@ export default function CollectPaymentPage() {
                 <div className="rounded-xl border border-emerald-300/30 bg-emerald-400/10 p-3 text-emerald-100">
                   <div className="font-semibold">Payment {completionInfo.status}</div>
                   <div>Payment ID: {completionInfo.paymentId}</div>
-                  <div>Provider Payment: {displayValue(completionInfo.providerPaymentId)}</div>
+                  <div>External payment ref: {displayValue(completionInfo.providerPaymentId)}</div>
                   <div>Invoice ID: {displayValue(completionInfo.invoiceId)}</div>
                   <div>Amount: {formatCurrency(completionInfo.amount)}</div>
                   <div>Completed at: {formatDateTime(completionInfo.finishedAt)}</div>
@@ -614,7 +738,7 @@ export default function CollectPaymentPage() {
             <div className="rounded-2xl border border-slate-200 p-4">
               <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-950">
                 <FileText className="h-4 w-4 text-slate-500" />
-                ServiceTitan job
+                Job details
               </div>
               <div className="space-y-2">
                 <FieldRow label="Job ID" value={jobInfo.id} />
@@ -629,28 +753,12 @@ export default function CollectPaymentPage() {
 
             <div className="rounded-2xl border border-slate-200 p-4">
               <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-950">
-                <Link2 className="h-4 w-4 text-slate-500" />
-                ServiceTitan invoice
-              </div>
-              <div className="space-y-2">
-                <FieldRow label="Invoice ID" value={invoiceInfo.id} />
-                <FieldRow label="Invoice number" value={invoiceInfo.number} />
-                <FieldRow label="Total" value={invoiceInfo.total} />
-                <FieldRow label="Balance" value={invoiceInfo.balance} />
-                <FieldRow label="Tax" value={invoiceInfo.tax} />
-                <FieldRow label="Due date" value={invoiceInfo.dueDate} />
-                <FieldRow label="Created on" value={invoiceInfo.createdOn} />
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 p-4">
-              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-950">
                 <ShieldCheck className="h-4 w-4 text-slate-500" />
                 TPay payment
               </div>
               <div className="space-y-2 text-sm text-slate-600">
                 <div>Payment ID: {displayValue(paymentId)}</div>
-                <div>Provider intent: {displayValue(providerIntentId)}</div>
+                <div>Payment intent ref: {displayValue(providerIntentId)}</div>
                 <div>Status: {displayValue(shownStatus, "Not created")}</div>
                 <div>Amount: {formatCurrency(paymentQuery.data?.amount)}</div>
                 <div>Idempotency key: {displayValue(idempotencyKey)}</div>

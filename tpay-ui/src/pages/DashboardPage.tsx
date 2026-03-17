@@ -425,7 +425,7 @@ export default function DashboardPage() {
             <Badge className="border-amber-200 bg-amber-50 text-amber-800">Merchant Portal MVP</Badge>
             <div className="space-y-2">
               <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-slate-950">
-                TPay dashboard for ServiceTitan-driven collections and exception-first reconciliation.
+                TPay dashboard for job-linked collections and exception-first reconciliation.
               </h1>
               <p className="max-w-2xl text-base text-slate-600">
                 Placeholder branding, merchant isolation-ready structure, and live visibility into payments, invoice-linked collections, and reconciliation exceptions.
@@ -433,10 +433,10 @@ export default function DashboardPage() {
             </div>
             <div className="flex flex-wrap gap-3">
               <Link
-                to="/collect"
+                to="/payments"
                 className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold !text-white transition hover:bg-slate-800"
               >
-                Collect payment
+                View payments
                 <ArrowRight className="h-4 w-4" />
               </Link>
               <Link
@@ -679,7 +679,7 @@ export default function DashboardPage() {
               Hardcoded merchant identity is assumed for now, but the information architecture is ready for tenant-based isolation.
             </div>
             <div className="rounded-2xl bg-slate-50 p-4">
-              Chargebacks remain a placeholder metric until provider and dispute workflows are added.
+              Chargebacks remain a placeholder metric until external network and dispute workflows are added.
             </div>
             <div className="rounded-2xl bg-slate-50 p-4">
               Reconciliation stays exception-driven so merchants spend time only on missing and mismatched records.

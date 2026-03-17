@@ -86,7 +86,7 @@ export default function ExceptionDetailPage() {
             </div>
             <CardTitle className="mt-3">Reconciliation exception detail</CardTitle>
             <CardDescription>
-              Internal expected amount, provider actual amount, settlement date, and audit context for merchant review.
+              Internal expected amount, external actual amount, settlement date, and audit context for merchant review.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
@@ -107,12 +107,12 @@ export default function ExceptionDetailPage() {
             <div className="rounded-3xl border border-slate-200 bg-slate-950 p-5 text-white">
               <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-white">
                 <Wallet className="h-4 w-4 text-slate-300" />
-                Provider record
+                External record
               </div>
-              <DetailRow tone="dark" label="Provider payment ID" value={<span className="font-mono text-xs text-slate-100">{detail?.provider_payment_id ?? "-"}</span>} />
+              <DetailRow tone="dark" label="External payment ref" value={<span className="font-mono text-xs text-slate-100">{detail?.provider_payment_id ?? "-"}</span>} />
               <DetailRow tone="dark" label="Actual amount" value={detail?.actual_amount == null ? "-" : formatCurrency(detail.actual_amount)} />
               <DetailRow tone="dark" label="Difference" value={detail?.difference == null ? "-" : formatCurrency(detail.difference)} />
-              <DetailRow tone="dark" label="Provider status" value={detail?.provider_status ?? "-"} />
+              <DetailRow tone="dark" label="External status" value={detail?.provider_status ?? "-"} />
               <DetailRow tone="dark" label="Settlement date" value={detail?.settlement_date ?? "-"} />
               <DetailRow tone="dark" label="Exception captured" value={formatDateTime(detail?.created_at)} />
             </div>
@@ -158,7 +158,7 @@ export default function ExceptionDetailPage() {
               <div className="text-sm font-semibold text-slate-950">Review note</div>
               <textarea
                 className="mt-3 min-h-32 w-full rounded-xl border border-slate-200 p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Example: provider amount excluded a fee adjustment; variance reviewed and accepted."
+                placeholder="Example: external amount excluded a fee adjustment; variance reviewed and accepted."
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
               />
@@ -181,7 +181,7 @@ export default function ExceptionDetailPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <DetailRow label="Current status" value={payment?.status ?? "-"} />
-            <DetailRow label="Provider reference" value={payment?.provider_payment_id ?? "-"} />
+            <DetailRow label="External reference" value={payment?.provider_payment_id ?? "-"} />
             <DetailRow label="Retry count" value={payment?.retry_count ?? 0} />
             <DetailRow
               label="Idempotency key"
@@ -194,7 +194,7 @@ export default function ExceptionDetailPage() {
         <Card>
           <CardHeader>
             <CardTitle>Webhook audit history</CardTitle>
-            <CardDescription>Status-adjacent provider events for this payment.</CardDescription>
+            <CardDescription>Status-adjacent external events for this payment.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {events.length === 0 ? (
@@ -209,7 +209,7 @@ export default function ExceptionDetailPage() {
                     <div className="text-xs text-slate-500">{formatDateTime(event.received_at)}</div>
                   </div>
                   <div className="mt-2 text-sm text-slate-500">
-                    Provider event ID: <span className="font-mono text-xs text-slate-700">{event.provider_event_id}</span>
+                    Event ID: <span className="font-mono text-xs text-slate-700">{event.provider_event_id}</span>
                   </div>
                   {event.processing_error ? (
                     <div className="mt-2 text-sm text-rose-700">Processing error: {event.processing_error}</div>

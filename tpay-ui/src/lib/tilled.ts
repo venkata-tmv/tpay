@@ -13,10 +13,10 @@ export async function loadTilledJs(): Promise<any> {
     s.src = "https://js.tilled.com/v2";
     s.async = true;
     s.onload = () => resolve();
-    s.onerror = () => reject(new Error("Failed to load Tilled.js"));
+    s.onerror = () => reject(new Error("Failed to load card SDK."));
     document.body.appendChild(s);
   });
 
-  if (!window.Tilled) throw new Error("Tilled.js loaded but window.Tilled missing");
+  if (!window.Tilled) throw new Error("Card SDK loaded but client object missing.");
   return window.Tilled;
 }

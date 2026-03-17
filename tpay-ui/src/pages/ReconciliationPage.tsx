@@ -196,7 +196,7 @@ export default function ReconciliationPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
-              placeholder="Search payment, provider ref, or error"
+              placeholder="Search payment, external ref, or error"
             />
           </div>
         </CardHeader>
@@ -209,7 +209,7 @@ export default function ReconciliationPage() {
                   <TH>Expected</TH>
                   <TH>Actual</TH>
                   <TH>Status</TH>
-                  <TH>Provider</TH>
+                  <TH>External ref</TH>
                   <TH>Internal status</TH>
                   <TH>Run</TH>
                   <TH>Action</TH>

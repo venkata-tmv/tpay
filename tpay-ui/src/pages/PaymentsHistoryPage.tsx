@@ -51,7 +51,7 @@ function AuditEvent({ event }: { event: WebhookEvent }) {
         <div className="text-xs text-slate-500">{formatDateTime(event.received_at)}</div>
       </div>
       <div className="mt-2 text-sm text-slate-500">
-        Provider event: <span className="font-mono text-xs text-slate-700">{event.provider_event_id}</span>
+        Event reference: <span className="font-mono text-xs text-slate-700">{event.provider_event_id}</span>
       </div>
       {event.processing_error ? (
         <div className="mt-2 text-sm text-rose-700">Processing error: {event.processing_error}</div>
@@ -194,7 +194,7 @@ export default function PaymentsHistoryPage() {
                     <TH>Amount</TH>
                     <TH>Status</TH>
                     <TH>Date</TH>
-                    <TH>Provider ref</TH>
+                    <TH>External ref</TH>
                     <TH>Retry</TH>
                   </TR>
                 </THead>
@@ -272,7 +272,7 @@ export default function PaymentsHistoryPage() {
                     <div className="text-sm text-slate-500">Job {detail.job_id}</div>
                   </div>
                   <div className="rounded-2xl border border-slate-200 p-4">
-                    <div className="text-xs uppercase tracking-wide text-slate-500">Provider reference</div>
+                    <div className="text-xs uppercase tracking-wide text-slate-500">External reference</div>
                     <div className="mt-2 text-sm font-semibold text-slate-950">{detail.provider_payment_id ?? "Not attached"}</div>
                     <div className="text-sm text-slate-500">Retries: {detail.retry_count ?? 0}</div>
                   </div>

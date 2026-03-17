@@ -220,6 +220,9 @@ export const ReconciliationAPI = {
 };
 
 export const ServiceTitanAPI = {
+  listJobs: (query = "") =>
+    apiFetch<Record<string, unknown>>(`/servicetitan/jobs${query}`, { method: "GET" }),
+
   getJob: (jobId: string | number) =>
     apiFetch<Record<string, unknown>>(`/servicetitan/jobs/${jobId}`, { method: "GET" }),
 
